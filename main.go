@@ -1,20 +1,36 @@
 package main
 
 import (
-	"gin-mongo-api/configs"
-	"gin-mongo-api/routes" //add this
+	"net/http"
+	"os"
+	"user-service/cmd/routes"
+	"user-service/internal/configs"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	router := gin.Default()
 
+	log.Info().Msg("Starting server...")
 	//run database
 	configs.ConnectDB()
 
 	//routes
-	routes.UserRoute(router) //add this
+	routes.UserRoute(router)
+	port := os.Getenv("PORT")
+	if port == "" {
+		log.Info().Msg("No PORT environment variable detected, defaulting to 6000")
+		port = "6000" // Default port for local development
+	}
 
-	router.Run("localhost:6000")
+	// Start the server on the specified port
+	err := http.ListenAndServe(":"+port, router)
+	if err != nil {
+		log.Error().Err(err).Msg("Error starting server on port " + port)
+		panic(err)
+	}
 }
