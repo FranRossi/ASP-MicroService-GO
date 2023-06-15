@@ -43,13 +43,6 @@ func CreateUser() gin.HandlerFunc {
 			return
 		}
 
-		hashedPassword, err := HashPassword(user.Password)
-		if err != nil {
-			log.Error().Err(err).Msg("Error hashing password")
-			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "hashing error", Data: map[string]interface{}{"data": err.Error()}})
-			return
-		}
-
 		var companyIdObject primitive.ObjectID
 		var err2 error = nil
 
@@ -77,7 +70,7 @@ func CreateUser() gin.HandlerFunc {
 		userWithCompany := models.UserWithCompanyAsObject{
 			Name:     user.Name,
 			Email:    user.Email,
-			Password: hashedPassword,
+			Password: user.Password,
 			Role:     user.Role,
 			Company:  companyIdObject,
 		}
@@ -126,11 +119,6 @@ func FindById() gin.HandlerFunc {
 		log.Info().Msg("User: " + userId + " retrieved successfully")
 		c.JSON(http.StatusOK, responses.UserResponse{Status: http.StatusOK, Message: "success", Data: map[string]interface{}{"user": user}})
 	}
-}
-
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	return string(bytes), err
 }
 
 func CreateCompany(company string) (string, error) {
