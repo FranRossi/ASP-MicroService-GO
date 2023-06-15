@@ -41,12 +41,17 @@ func CreateUser() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, responses.UserResponse{Status: http.StatusBadRequest, Message: "validation error", Data: map[string]interface{}{"data": err.Error()}})
 			return
 		}
+		var result bson.M
+		_ = userCollection.FindOne(ctx, bson.D{{"email", user.Email}}).Decode(&result)
+		if result != nil {
+			log.Error().Msg("User already exists")
+			c.JSON(http.StatusBadRequest, responses.UserResponse{Status: http.StatusBadRequest, Message: "user already exists", Data: map[string]interface{}{"data": "user already exists"}})
+			return
+		}
 
 		var companyIdObject primitive.ObjectID
 		var err2 error = nil
 
-		log.Info().Msg("user recieved: " + user.Company)
-		log.Info().Msg("user name: " + user.Name)
 		if user.Invitation {
 			log.Info().Msg("user is invited")
 			companyIdObject, err2 = primitive.ObjectIDFromHex(user.Company)
@@ -74,14 +79,14 @@ func CreateUser() gin.HandlerFunc {
 			Company:  companyIdObject,
 		}
 
-		result, err := userCollection.InsertOne(ctx, userWithCompany)
-		if err != nil {
-			log.Error().Err(err).Msg("Error storing a user on database")
+		result2, err3 := userCollection.InsertOne(ctx, userWithCompany)
+		if err3 != nil {
+			log.Error().Err(err3).Msg("Error storing a user on database")
 			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "error creating a user", Data: map[string]interface{}{"data": err.Error()}})
 			return
 		}
 		log.Info().Msg("User created successfully")
-		user.Id = result.InsertedID.(primitive.ObjectID).Hex()
+		user.Id = result2.InsertedID.(primitive.ObjectID).Hex()
 		log.Info().Msg("User ID: " + user.Id)
 		c.JSON(http.StatusCreated, responses.UserResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"user": user}})
 	}
