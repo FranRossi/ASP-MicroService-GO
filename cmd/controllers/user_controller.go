@@ -7,22 +7,32 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"time"
 	"user-service/cmd/responses"
-	"user-service/internal/configs"
 	"user-service/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/rs/zerolog/log"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"golang.org/x/crypto/bcrypt"
 )
 
-var userCollection *mongo.Collection = configs.GetCollection(configs.DB, "users")
+// HTTPClient interface
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+var (
+	Client HTTPClient
+	DB     Database
+)
+
 var validate = validator.New()
+
+func init() {
+	Client = &http.Client{}
+}
 
 func CreateUser() gin.HandlerFunc {
 	log.Info().Msg("Create user endpoint reached")
@@ -30,7 +40,7 @@ func CreateUser() gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		var user models.User
 		defer cancel()
-
+		log.Info().Msg("User being created:" + user.Password)
 		if err := c.BindJSON(&user); err != nil {
 			log.Error().Err(err).Msg("error wrong json format")
 			return
@@ -43,18 +53,9 @@ func CreateUser() gin.HandlerFunc {
 			return
 		}
 
-		hashedPassword, err := HashPassword(user.Password)
-		if err != nil {
-			log.Error().Err(err).Msg("Error hashing password")
-			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "hashing error", Data: map[string]interface{}{"data": err.Error()}})
-			return
-		}
-
 		var companyIdObject primitive.ObjectID
 		var err2 error = nil
 
-		log.Info().Msg("user recieved: " + user.Company)
-		log.Info().Msg("user name: " + user.Name)
 		if user.Invitation {
 			log.Info().Msg("user is invited")
 			companyIdObject, err2 = primitive.ObjectIDFromHex(user.Company)
@@ -77,19 +78,21 @@ func CreateUser() gin.HandlerFunc {
 		userWithCompany := models.UserWithCompanyAsObject{
 			Name:     user.Name,
 			Email:    user.Email,
-			Password: hashedPassword,
+			Password: user.Password,
 			Role:     user.Role,
 			Company:  companyIdObject,
 		}
 
-		result, err := userCollection.InsertOne(ctx, userWithCompany)
+		// Call the CreateUser method on the DB interface
+		userId, err := DB.CreateUser(ctx, userWithCompany)
 		if err != nil {
 			log.Error().Err(err).Msg("Error storing a user on database")
 			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "error creating a user", Data: map[string]interface{}{"data": err.Error()}})
 			return
 		}
+
 		log.Info().Msg("User created successfully")
-		user.Id = result.InsertedID.(primitive.ObjectID).Hex()
+		user.Id = userId.Hex()
 		log.Info().Msg("User ID: " + user.Id)
 		c.JSON(http.StatusCreated, responses.UserResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"user": user}})
 	}
@@ -111,12 +114,11 @@ func FindById() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		userId := c.Param("userId")
-		var user models.User
 		defer cancel()
 
 		objId, _ := primitive.ObjectIDFromHex(userId)
 
-		err := userCollection.FindOne(ctx, bson.M{"_id": objId}).Decode(&user)
+		userWithCompany, err := DB.FindUserByID(ctx, objId)
 		if err != nil {
 			log.Error().Err(err).Msg("Error getting a user from database")
 			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "Error getting a user from database", Data: map[string]interface{}{"data": err.Error()}})
@@ -124,24 +126,18 @@ func FindById() gin.HandlerFunc {
 		}
 
 		log.Info().Msg("User: " + userId + " retrieved successfully")
-		c.JSON(http.StatusOK, responses.UserResponse{Status: http.StatusOK, Message: "success", Data: map[string]interface{}{"user": user}})
+		c.JSON(http.StatusOK, responses.UserResponse{Status: http.StatusOK, Message: "success", Data: map[string]interface{}{"user": userWithCompany}})
 	}
 }
 
-func HashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
-	return string(bytes), err
-}
-
 func CreateCompany(company string) (string, error) {
-	url := "http://localhost:3000/companies"
+	url := os.Getenv("COMPANY_SERVICE_URL")
 	jsonStr := []byte(`{"name":"` + company + `"}`)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonStr))
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := Client.Do(req)
 	if err != nil {
 		log.Error().Err(err).Msg("Error creating a new company on separate service")
 		return "", errors.New("failed creating a new company on separate service")
@@ -164,6 +160,7 @@ func CreateCompany(company string) (string, error) {
 	if responseMap["error"] != nil {
 		return "", errors.New(responseMap["message"].(string))
 	}
+
 	companyIdStr, ok := responseMap["id"].(string)
 	if !ok {
 		log.Error().Msg("Fail to extract companny ID")
@@ -178,7 +175,7 @@ func GetUsers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-
+		log.Info().Msg(c.Query("email"))
 		email := c.Query("email")
 		if email != "" {
 			FindByEmail(c, email)
@@ -192,29 +189,10 @@ func GetUsers() gin.HandlerFunc {
 		}
 
 		objId, _ := primitive.ObjectIDFromHex(companyId)
-		filter := bson.M{"company": objId}
-		cursor, err := userCollection.Find(ctx, filter)
-		if err != nil || cursor == nil {
+		usersList, err := DB.FindAllUsers(ctx, objId)
+		if err != nil {
 			log.Error().Err(err).Msg("There was a problem trying to find users on database")
 			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "failed to fetch users", Data: nil})
-			return
-		}
-		defer cursor.Close(ctx)
-
-		var usersList []bson.M
-		for cursor.Next(ctx) {
-			var user bson.M
-			if err := cursor.Decode(&user); err != nil {
-				log.Error().Err(err).Msg("Error trying to decode user on database to model")
-				c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "failed to decode user", Data: nil})
-				return
-			}
-			delete(user, "password")
-			usersList = append(usersList, user)
-		}
-		if err := cursor.Err(); err != nil {
-			log.Error().Err(err).Msg("Error on cursos from database")
-			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "failed to iterate over users", Data: nil})
 			return
 		}
 
@@ -228,9 +206,7 @@ func FindByEmail(c *gin.Context, email string) {
 	defer cancel()
 
 	log.Info().Msg("Looking for user: " + email)
-	filter := bson.M{"email": email}
-	var user models.User
-	err := userCollection.FindOne(ctx, filter).Decode(&user)
+	userWithCompany, err := DB.FindUserByEmail(ctx, email)
 	if err != nil {
 		log.Error().Err(err).Msg("Error getting a user from database")
 		c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "Error getting a user from database", Data: map[string]interface{}{"data": err.Error()}})
@@ -238,5 +214,5 @@ func FindByEmail(c *gin.Context, email string) {
 	}
 
 	log.Info().Msg("User: " + email + " retrieved successfully")
-	c.JSON(http.StatusOK, responses.UserResponse{Status: http.StatusOK, Message: "success", Data: map[string]interface{}{"user": user}})
+	c.JSON(http.StatusOK, responses.UserResponse{Status: http.StatusOK, Message: "success", Data: map[string]interface{}{"user": userWithCompany}})
 }
