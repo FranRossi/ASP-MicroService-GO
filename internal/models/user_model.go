@@ -13,6 +13,7 @@ type User struct {
 }
 
 type UserWithCompanyAsObject struct {
+	Id       primitive.ObjectID `json:"_id,omitempty" bson:"_id,omitempty"`
 	Name     string             `json:"name,omitempty"`
 	Password string             `json:"password,omitempty"`
 	Email    string             `json:"email,omitempty"`
