@@ -108,6 +108,7 @@ func CreateUser() gin.HandlerFunc {
 
 		log.Info().Msg("User created successfully")
 		user.Id = userId.Hex()
+
 		log.Info().Msg("User ID: " + user.Id)
 		c.JSON(http.StatusCreated, responses.UserResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"user": user}})
 	}
