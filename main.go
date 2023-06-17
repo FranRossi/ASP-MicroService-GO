@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"os"
 	"user-service/cmd/routes"
-	"user-service/internal/configs"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -16,8 +15,6 @@ func main() {
 	router := gin.Default()
 
 	log.Info().Msg("Starting server...")
-	//run database
-	configs.ConnectDB()
 
 	//routes
 	routes.UserRoute(router)
