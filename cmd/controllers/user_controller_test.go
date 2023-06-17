@@ -140,6 +140,9 @@ func TestCreateNewUser(t *testing.T) {
 	Client = mockClient
 
 	mockDB := &MockDB{}
+	mockDB.FindUserByEmailFunc = func(ctx context.Context, email string) (*models.UserWithCompanyAsObject, error) {
+		return nil, nil
+	}
 	mockDB.CreateUserFunc = func(ctx context.Context, user models.UserWithCompanyAsObject) (primitive.ObjectID, error) {
 		id, _ := primitive.ObjectIDFromHex("648a26b07c0d535bb1526e1a")
 		return id, nil
@@ -188,6 +191,97 @@ func TestCreateNewUser(t *testing.T) {
 	assert.Equal(t, "test@example.com", userData["email"])
 	assert.Equal(t, "admin", userData["role"])
 	assert.Equal(t, "Test Company", userData["company"])
+}
+
+func TestUserAlreadyExist(t *testing.T) {
+	router := gin.Default()
+
+	user := models.UserWithCompanyAsObject{
+		Id:       primitive.NewObjectID(),
+		Name:     "Test User",
+		Email:    "test@gmail.com",
+		Password: "password",
+		Role:     "admin",
+		Company:  primitive.NewObjectID(),
+	}
+	mockDB := &MockDB{}
+	mockDB.FindUserByEmailFunc = func(ctx context.Context, email string) (*models.UserWithCompanyAsObject, error) {
+
+		return &user, nil
+	}
+
+	// Set up the mock client response JSON for creating a user
+	mockUserResponseJSON := `{
+		"status": 400,
+		"message": "User already exists with email: ` + user.Email + `",
+		"data": {
+			"data": "User already exists with email: fran@gmail.com"
+		}
+	}`
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+
+	// Set up the mock response for creating a user
+	mockUserResponseBody := []byte(mockUserResponseJSON)
+	mockUserHTTPResponse := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockUserResponseBody)),
+	}
+
+	// Set up the DoFunc for the mock client
+	mockClient.DoFunc = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/users" {
+			// If the request is for creating a user, return the mock user response
+			return mockUserHTTPResponse, nil
+		}
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	// Assign the mock client's DoFunc to the GetDoFunc variable
+	GetDoFunc = mockClient.DoFunc
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	mockDB.FindUserByEmailFunc = func(ctx context.Context, email string) (*models.UserWithCompanyAsObject, error) {
+		return &user, nil
+	}
+
+	DB = mockDB
+
+	// Set up the route
+	router.POST("/users", CreateUser())
+
+	// Create a custom request payload
+	requestPayload := models.User{
+		Name:     "Test User",
+		Email:    "test@example.com",
+		Password: "password",
+		Role:     "admin",
+		Company:  "Test Company",
+	}
+
+	// Convert the request payload to JSON
+	payload, _ := json.Marshal(requestPayload)
+
+	// Create a POST request with the payload
+	req, _ := http.NewRequest("POST", "/users", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "User already exists with email: "+user.Email, response.Message)
 }
 
 func TestCreateUserInvalidUserName(t *testing.T) {

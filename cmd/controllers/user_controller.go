@@ -56,6 +56,18 @@ func CreateUser() gin.HandlerFunc {
 			return
 		}
 
+		if user, _ := DB.FindUserByEmail(ctx, user.Email); user != nil {
+			log.Error().Msg("User already exists with email: " + user.Email)
+			c.JSON(http.StatusBadRequest, responses.UserResponse{
+				Status:  http.StatusBadRequest,
+				Message: "User already exists with email: " + user.Email,
+				Data: map[string]interface{}{
+					"data": "User already exists with email: " + user.Email,
+				},
+			})
+			return
+		}
+
 		var companyIdObject primitive.ObjectID
 		var err2 error = nil
 
