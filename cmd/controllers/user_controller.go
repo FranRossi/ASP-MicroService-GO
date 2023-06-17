@@ -8,8 +8,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 	"user-service/cmd/responses"
+	"user-service/internal/configs"
 	"user-service/internal/models"
 
 	"github.com/gin-gonic/gin"
@@ -25,13 +27,14 @@ type HTTPClient interface {
 
 var (
 	Client HTTPClient
-	DB     Database
+	DB     configs.Database
 )
 
 var validate = validator.New()
 
 func init() {
 	Client = &http.Client{}
+	DB = configs.NewMongoDB(configs.ConnectDB())
 }
 
 func CreateUser() gin.HandlerFunc {
@@ -72,7 +75,7 @@ func CreateUser() gin.HandlerFunc {
 
 		if err2 != nil {
 			log.Error().Err(err2).Msg("Error converting company ID to object")
-			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "error on companyId as an object", Data: map[string]interface{}{"data": err.Error()}})
+			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "error on companyId as an object", Data: map[string]interface{}{"data": err2.Error()}})
 			return
 		}
 		userWithCompany := models.UserWithCompanyAsObject{
@@ -87,7 +90,7 @@ func CreateUser() gin.HandlerFunc {
 		userId, err := DB.CreateUser(ctx, userWithCompany)
 		if err != nil {
 			log.Error().Err(err).Msg("Error storing a user on database")
-			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "error creating a user", Data: map[string]interface{}{"data": err.Error()}})
+			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "error storing user on database", Data: map[string]interface{}{"data": err.Error()}})
 			return
 		}
 
@@ -138,33 +141,30 @@ func CreateCompany(company string) (string, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := Client.Do(req)
-	if err != nil {
+
+	log.Info().Msg("Response When creating a new company on separate service Stasus: " + resp.Status + " StatusCode: " + strconv.Itoa(resp.StatusCode))
+	isTue := resp.StatusCode == http.StatusCreated
+	log.Info().Msg("StatusCode is created: " + strconv.FormatBool(isTue))
+
+	if err != nil || resp.StatusCode != http.StatusCreated {
 		log.Error().Err(err).Msg("Error creating a new company on separate service")
 		return "", errors.New("failed creating a new company on separate service")
 	}
 	defer resp.Body.Close()
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
+	if err != nil || len(bodyBytes) == 0 {
 		log.Error().Err(err).Msg("Error reading response body when creating a new company on separate service")
-		return "", err
+		return "", errors.New("failed reading response body when creating a new company on separate service")
 	}
 
 	// Extract values from response body
 	var responseMap map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &responseMap)
-	if err != nil {
-		log.Error().Err(err).Msg("Error unmarshalling response body when creating a new company on separate service")
-		return "", err
-	}
-
-	if responseMap["error"] != nil {
-		return "", errors.New(responseMap["message"].(string))
-	}
+	_ = json.Unmarshal(bodyBytes, &responseMap)
 
 	companyIdStr, ok := responseMap["id"].(string)
 	if !ok {
 		log.Error().Msg("Fail to extract companny ID")
-		return "", errors.New("failed to extract company ID")
+		return "", errors.New("failed to extract company Id from response body when creating a new company on separate service")
 	}
 
 	return companyIdStr, nil
@@ -175,24 +175,25 @@ func GetUsers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		log.Info().Msg(c.Query("email"))
 		email := c.Query("email")
 		if email != "" {
 			FindByEmail(c, email)
 			return
 		}
+		log.Info().Msg("Llego hasta aqui")
+		log.Info().Msg(c.Query("company"))
 		companyId := c.Query("company")
 		if companyId == "" || companyId == "undefined" {
-			log.Error().Msg("company query parameter is missing")
-			c.JSON(http.StatusBadRequest, responses.UserResponse{Status: http.StatusBadRequest, Message: "company query parameter is missing", Data: nil})
+			log.Error().Msg("Error getting user for a company, Company query parameter is missing")
+			c.JSON(http.StatusBadRequest, responses.UserResponse{Status: http.StatusBadRequest, Message: "Error getting user for a company, Company query parameter is missing", Data: nil})
 			return
 		}
 
 		objId, _ := primitive.ObjectIDFromHex(companyId)
 		usersList, err := DB.FindAllUsers(ctx, objId)
 		if err != nil {
-			log.Error().Err(err).Msg("There was a problem trying to find users on database")
-			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "failed to fetch users", Data: nil})
+			log.Error().Err(err).Msg("There was a problem trying to find users on database with this compnay Id: " + companyId)
+			c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "There was a problem trying to find users on database", Data: nil})
 			return
 		}
 
@@ -208,8 +209,8 @@ func FindByEmail(c *gin.Context, email string) {
 	log.Info().Msg("Looking for user: " + email)
 	userWithCompany, err := DB.FindUserByEmail(ctx, email)
 	if err != nil {
-		log.Error().Err(err).Msg("Error getting a user from database")
-		c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "Error getting a user from database", Data: map[string]interface{}{"data": err.Error()}})
+		log.Error().Err(err).Msg("Error getting a user from database with email: " + email)
+		c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "Error getting a user from database with provided email", Data: map[string]interface{}{"data": err.Error()}})
 		return
 	}
 

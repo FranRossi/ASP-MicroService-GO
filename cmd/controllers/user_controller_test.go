@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -551,4 +552,593 @@ func TestInvitewUser(t *testing.T) {
 	assert.Equal(t, "test@example.com", userData["email"])
 	assert.Equal(t, "admin", userData["role"])
 	assert.Equal(t, "606d97b4c1bea43ce49be6dc", userData["company"])
+}
+
+func TestErrorCreatingACompany(t *testing.T) {
+	router := gin.Default()
+
+	// Set up the mock client response JSON for creating a company
+	mockCompanyResponseErrorJSON := `{
+		"statusCode": 500,
+		"message": "error",
+		"data": {
+			"error": "error creating company"
+		}
+	}`
+
+	// Set up the mock client response JSON for creating a user
+	mockUserErrorResponseJSON := `{
+		"statusCode": 500,
+		"message": "company error",
+		"data": {
+			"error": "failed creating a new company on separate service"
+		}
+	}`
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+
+	// Set up the mock response for creating a company
+	mockCompanyResponseBody := []byte(mockCompanyResponseErrorJSON)
+	mockCompanyHTTPResponse := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockCompanyResponseBody)),
+	}
+
+	// Set up the mock response for creating a user
+	mockUserResponseBody := []byte(mockUserErrorResponseJSON)
+	mockUserHTTPResponse := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockUserResponseBody)),
+	}
+
+	// Set up the DoFunc for the mock client
+	mockClient.DoFunc = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/companies" {
+			// If the request is for creating a company, return the mock company response
+			return mockCompanyHTTPResponse, nil
+		} else if req.URL.Path == "/users" {
+			// If the request is for creating a user, return the mock user response
+			return mockUserHTTPResponse, nil
+		}
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	// Assign the mock client's DoFunc to the GetDoFunc variable
+	GetDoFunc = mockClient.DoFunc
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	// Set up the route
+	router.POST("/users", CreateUser())
+
+	// Create a custom request payload
+	requestPayload := models.User{
+		Name:     "Test User",
+		Email:    "test@example.com",
+		Password: "password",
+		Role:     "admin",
+		Company:  "Test Company",
+	}
+
+	// Convert the request payload to JSON
+	payload, _ := json.Marshal(requestPayload)
+
+	// Create a POST request with the payload
+	req, _ := http.NewRequest("POST", "/users", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "company error", response.Message)
+}
+
+func TestErrorWrongObjectId(t *testing.T) {
+	router := gin.Default()
+
+	// Set up the mock client response JSON for creating a user
+	mockUserResponseJSON := `{
+		"status": 500,
+		"message": "error on companyId as an object",
+		"data": {
+			"error": "companyId must be a string"
+		}
+	}`
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+
+	// Set up the mock response for creating a user
+	mockUserResponseBody := []byte(mockUserResponseJSON)
+	mockUserHTTPResponse := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockUserResponseBody)),
+	}
+
+	// Set up the DoFunc for the mock client
+	mockClient.DoFunc = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/users" {
+			// If the request is for creating a company, return the mock company response
+			return mockUserHTTPResponse, nil
+		}
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	// Assign the mock client's DoFunc to the GetDoFunc variable
+	GetDoFunc = mockClient.DoFunc
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	// Set up the route
+	router.POST("/users", CreateUser())
+
+	// Create a custom request payload
+	requestPayload := models.User{
+		Name:       "Test User",
+		Email:      "test@example.com",
+		Password:   "password",
+		Role:       "admin",
+		Invitation: true,
+		Company:    "606d97b4c1bea43ce49be6dc_!WorngId",
+	}
+
+	// Convert the request payload to JSON
+	payload, _ := json.Marshal(requestPayload)
+
+	// Create a POST request with the payload
+	req, _ := http.NewRequest("POST", "/users", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "error on companyId as an object", response.Message)
+}
+
+func TestErrorDatabase(t *testing.T) {
+	router := gin.Default()
+
+	// Set up the mock client response JSON for creating a company
+	mockCompanyResponseJSON := `{
+		"id": "606d97b4c1bea43ce49be6dc",
+		"name": "Test Company",
+		"apiKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjb21wYW55TmFtZSI6ImFiZWxpdG9oMTg1NTY1MiIsImlhdCI6MTY4NTU2OTk3NH0.tt_WYAWZnKsZQLirW3uvLgw7K56YAmvUIOd-ujJWGTE"
+	}`
+
+	// Set up the mock client response JSON for creating a user
+	mockUserResponseJSON := `{
+		"status": 500,
+		"message": "error storing user on database",
+		"data": {
+			"error": "error storing user on database"
+		}
+	}`
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+
+	// Set up the mock response for creating a company
+	mockCompanyResponseBody := []byte(mockCompanyResponseJSON)
+	mockCompanyHTTPResponse := &http.Response{
+		StatusCode: http.StatusCreated,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockCompanyResponseBody)),
+	}
+
+	// Set up the mock response for creating a user
+	mockUserResponseBody := []byte(mockUserResponseJSON)
+	mockUserHTTPResponse := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockUserResponseBody)),
+	}
+
+	// Set up the DoFunc for the mock client
+	mockClient.DoFunc = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/companies" {
+			// If the request is for creating a company, return the mock company response
+			return mockCompanyHTTPResponse, nil
+		} else if req.URL.Path == "/users" {
+			// If the request is for creating a user, return the mock user response
+			return mockUserHTTPResponse, nil
+		}
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	// Assign the mock client's DoFunc to the GetDoFunc variable
+	GetDoFunc = mockClient.DoFunc
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	mockDB := &MockDB{}
+	mockDB.CreateUserFunc = func(ctx context.Context, user models.UserWithCompanyAsObject) (primitive.ObjectID, error) {
+		return primitive.ObjectID{}, fmt.Errorf("error storing user on database")
+	}
+
+	DB = mockDB
+
+	// Set up the route
+	router.POST("/users", CreateUser())
+
+	// Create a custom request payload
+	requestPayload := models.User{
+		Name:       "Test User",
+		Email:      "test@example.com",
+		Password:   "password",
+		Role:       "admin",
+		Invitation: true,
+		Company:    "606d97b4c1bea43ce49be6dc",
+	}
+
+	// Convert the request payload to JSON
+	payload, _ := json.Marshal(requestPayload)
+
+	// Create a POST request with the payload
+	req, _ := http.NewRequest("POST", "/users", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "error storing user on database", response.Message)
+}
+
+func TestErrorFindUserByID(t *testing.T) {
+	// Create a new Gin router
+	router := gin.Default()
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+	// ...
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	mockDB := &MockDB{}
+	mockDB.FindUserByIDFunc = func(ctx context.Context, id primitive.ObjectID) (*models.UserWithCompanyAsObject, error) {
+		return nil, errors.New("mock find user by ID error")
+	}
+	DB = mockDB
+
+	// Set up the route
+	router.GET("/users/:userId", FindById())
+
+	// Create a GET request
+	req, _ := http.NewRequest("GET", "/users/123", nil)
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "Error getting a user from database", response.Message)
+
+	// Assert the error message in the response data
+	assert.Equal(t, "mock find user by ID error", response.Data["data"])
+}
+
+func TestErrorFindUserByEmail(t *testing.T) {
+	// Create a new Gin router
+	router := gin.Default()
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+	// ...
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	mockDB := &MockDB{}
+	mockDB.FindUserByEmailFunc = func(ctx context.Context, email string) (*models.UserWithCompanyAsObject, error) {
+		return nil, errors.New("mock find user by email error")
+	}
+	DB = mockDB
+
+	// Set up the route
+	router.GET("/users", GetUsers())
+
+	// Create a GET request
+	req, _ := http.NewRequest("GET", "/users?email=test@gmail.com", nil)
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "Error getting a user from database with provided email", response.Message)
+
+	// Assert the error message in the response data
+	assert.Equal(t, "mock find user by email error", response.Data["data"])
+}
+
+func TestErrorFindUsersEmptyCompanyId(t *testing.T) {
+	// Create a new Gin router
+	router := gin.Default()
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+	// ...
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	// Set up the route
+	router.GET("/users", GetUsers())
+
+	// Create a GET request
+	req, _ := http.NewRequest("GET", "/users?company=", nil)
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "Error getting user for a company, Company query parameter is missing", response.Message)
+}
+
+func TestErrorFindUsersDatabase(t *testing.T) {
+	// Create a new Gin router
+	router := gin.Default()
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+	// ...
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	mockDB := &MockDB{}
+	mockDB.FindAllUsersFunc = func(ctx context.Context, companyId primitive.ObjectID) ([]*models.UserWithCompanyAsObject, error) {
+		return nil, errors.New("mock find all users error")
+	}
+	DB = mockDB
+
+	// Set up the route
+	router.GET("/users", GetUsers())
+
+	// Create a GET request
+	req, _ := http.NewRequest("GET", "/users?company=64dc", nil)
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "There was a problem trying to find users on database", response.Message)
+}
+
+func TestErrorCreatingACompanyIoUtil(t *testing.T) {
+	router := gin.Default()
+
+	// Set up the mock client response JSON for creating a user
+	mockUserErrorResponseJSON := `{
+		"statusCode": 500,
+		"message": "company error",
+		"data": {
+			"error": "failed reading response body when creating a new company on separate service"
+		}
+	}`
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+
+	// Set up the mock response for creating a company
+	mockCompanyResponseBody := []byte{}
+	mockCompanyHTTPResponse := &http.Response{
+		StatusCode: http.StatusCreated,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockCompanyResponseBody)),
+	}
+
+	// Set up the mock response for creating a user
+	mockUserResponseBody := []byte(mockUserErrorResponseJSON)
+	mockUserHTTPResponse := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockUserResponseBody)),
+	}
+
+	// Set up the DoFunc for the mock client
+	mockClient.DoFunc = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/companies" {
+			// If the request is for creating a company, return the mock company response
+			return mockCompanyHTTPResponse, nil
+		} else if req.URL.Path == "/users" {
+			// If the request is for creating a user, return the mock user response
+			return mockUserHTTPResponse, nil
+		}
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	// Assign the mock client's DoFunc to the GetDoFunc variable
+	GetDoFunc = mockClient.DoFunc
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	// Set up the route
+	router.POST("/users", CreateUser())
+
+	// Create a custom request payload
+	requestPayload := models.User{
+		Name:     "Test User",
+		Email:    "test@example.com",
+		Password: "password",
+		Role:     "admin",
+		Company:  "Test Company",
+	}
+
+	// Convert the request payload to JSON
+	payload, _ := json.Marshal(requestPayload)
+
+	// Create a POST request with the payload
+	req, _ := http.NewRequest("POST", "/users", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	json.NewDecoder(resp.Body).Decode(&response)
+
+	// Check the response message
+	assert.Equal(t, "company error", response.Message)
+
+	// Check the error message in the response data
+	expectedErrorMessage := "failed reading response body when creating a new company on separate service"
+	assert.Equal(t, expectedErrorMessage, response.Data["data"])
+}
+
+func TestErrorCreatingACompanyResponseMap(t *testing.T) {
+	router := gin.Default()
+
+	// Set up the mock client response JSON for creating a user
+	mockUserErrorResponseJSON := `{
+		"statusCode": 500,
+		"message": "company error",
+		"data": {
+			"error": "failed to extract company Id from response body when creating a new company on separate service"
+		}
+	}`
+
+	mockCompanyErrorResponseJSON := `{
+		"statusCode": 500,
+		"message": "company error",
+		"data": {
+			"error": "err"
+		}
+	}`
+
+	// Set up the mock client
+	mockClient := &MockClient{}
+
+	// Set up the mock response for creating a company
+	mockCompanyResponseBody := []byte(mockCompanyErrorResponseJSON)
+	mockCompanyHTTPResponse := &http.Response{
+		StatusCode: http.StatusCreated,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockCompanyResponseBody)),
+	}
+
+	// Set up the mock response for creating a user
+	mockUserResponseBody := []byte(mockUserErrorResponseJSON)
+	mockUserHTTPResponse := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Body:       ioutil.NopCloser(bytes.NewReader(mockUserResponseBody)),
+	}
+
+	// Set up the DoFunc for the mock client
+	mockClient.DoFunc = func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/companies" {
+			// If the request is for creating a company, return the mock company response
+			return mockCompanyHTTPResponse, nil
+		} else if req.URL.Path == "/users" {
+			// If the request is for creating a user, return the mock user response
+			return mockUserHTTPResponse, nil
+		}
+		return nil, fmt.Errorf("unexpected request path: %s", req.URL.Path)
+	}
+
+	// Assign the mock client's DoFunc to the GetDoFunc variable
+	GetDoFunc = mockClient.DoFunc
+
+	// Assign the mock client to the controller
+	Client = mockClient
+
+	// Set up the route
+	router.POST("/users", CreateUser())
+
+	// Create a custom request payload
+	requestPayload := models.User{
+		Name:     "Test User",
+		Email:    "test@example.com",
+		Password: "password",
+		Role:     "admin",
+		Company:  "Test Company",
+	}
+
+	// Convert the request payload to JSON
+	payload, _ := json.Marshal(requestPayload)
+
+	// Create a POST request with the payload
+	req, _ := http.NewRequest("POST", "/users", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Perform the request and record the response
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	// Check the response status code
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+
+	// Parse the response body
+	var response responses.UserResponse
+	err := json.Unmarshal(resp.Body.Bytes(), &response)
+	assert.NoError(t, err)
+
+	// Check the response message
+	assert.Equal(t, "company error", response.Message)
+
+	// Check the error message in the response data
+	expectedErrorMessage := "failed to extract company Id from response body when creating a new company on separate service"
+	assert.Equal(t, expectedErrorMessage, response.Data["data"])
 }

@@ -1,10 +1,11 @@
-package controllers
+package configs
 
 import (
 	"context"
-	"user-service/internal/configs"
 	"user-service/internal/models"
 
+	"github.com/rs/zerolog/log"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -27,7 +28,7 @@ type MongoDB struct {
 func NewMongoDB(client *mongo.Client) *MongoDB {
 	return &MongoDB{
 		client:         client,
-		userCollection: configs.GetCollection(client, "users"),
+		userCollection: GetCollection(client, "users"),
 	}
 }
 
@@ -58,15 +59,27 @@ func (db *MongoDB) FindUserByEmail(ctx context.Context, email string) (*models.U
 	return &user, nil
 }
 
-func (db *MongoDB) FindAllUsers(ctx context.Context, companyId primitive.ObjectID) ([]models.UserWithCompanyAsObject, error) {
-	var users []models.UserWithCompanyAsObject
-	cursor, err := db.userCollection.Find(ctx, primitive.M{"company": companyId})
-	if err != nil {
+func (db *MongoDB) FindAllUsers(ctx context.Context, companyId primitive.ObjectID) ([]*models.UserWithCompanyAsObject, error) {
+	log.Info().Msg("Llego FindAllUsers")
+	filter := bson.M{"company": companyId}
+	cursor, err := db.userCollection.Find(ctx, filter)
+	if err != nil || cursor == nil {
 		return nil, err
 	}
-	if err = cursor.All(ctx, &users); err != nil {
-		return nil, err
-	}
-	return users, nil
+	defer cursor.Close(ctx)
 
+	var users []*models.UserWithCompanyAsObject
+	for cursor.Next(ctx) {
+		var user models.UserWithCompanyAsObject
+		if err := cursor.Decode(&user); err != nil {
+			return nil, err
+		}
+		user.Password = ""
+		users = append(users, &user)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, err
+	}
+
+	return users, nil
 }
