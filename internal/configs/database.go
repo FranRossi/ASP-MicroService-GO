@@ -4,7 +4,6 @@ import (
 	"context"
 	"user-service/internal/models"
 
-	"github.com/rs/zerolog/log"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -60,7 +59,6 @@ func (db *MongoDB) FindUserByEmail(ctx context.Context, email string) (*models.U
 }
 
 func (db *MongoDB) FindAllUsers(ctx context.Context, companyId primitive.ObjectID) ([]*models.UserWithCompanyAsObject, error) {
-	log.Info().Msg("Llego FindAllUsers")
 	filter := bson.M{"company": companyId}
 	cursor, err := db.userCollection.Find(ctx, filter)
 	if err != nil || cursor == nil {

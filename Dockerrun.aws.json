@@ -1,7 +1,7 @@
 {
     "AWSEBDockerrunVersion":"1",
     "Image":{
-        "Name":"frossi33/asp-microservice-go-user-service:v2",
+        "Name":"frossi33/asp-microservice-go-user-service",
         "Update": "true"
     },
 

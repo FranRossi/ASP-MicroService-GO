@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 	"user-service/cmd/responses"
 	"user-service/internal/configs"
@@ -109,7 +108,6 @@ func CreateUser() gin.HandlerFunc {
 		log.Info().Msg("User created successfully")
 		user.Id = userId.Hex()
 
-		log.Info().Msg("User ID: " + user.Id)
 		c.JSON(http.StatusCreated, responses.UserResponse{Status: http.StatusCreated, Message: "success", Data: map[string]interface{}{"user": user}})
 	}
 }
@@ -155,10 +153,6 @@ func CreateCompany(company string) (string, error) {
 
 	resp, err := Client.Do(req)
 
-	log.Info().Msg("Response When creating a new company on separate service Stasus: " + resp.Status + " StatusCode: " + strconv.Itoa(resp.StatusCode))
-	isTue := resp.StatusCode == http.StatusCreated
-	log.Info().Msg("StatusCode is created: " + strconv.FormatBool(isTue))
-
 	if err != nil || resp.StatusCode != http.StatusCreated {
 		log.Error().Err(err).Msg("Error creating a new company on separate service")
 		return "", errors.New("failed creating a new company on separate service")
@@ -179,6 +173,7 @@ func CreateCompany(company string) (string, error) {
 		log.Error().Msg("Fail to extract companny ID")
 		return "", errors.New("failed to extract company Id from response body when creating a new company on separate service")
 	}
+	log.Info().Msg("Company created on separate service successfully")
 
 	return companyIdStr, nil
 }
@@ -193,8 +188,7 @@ func GetUsers() gin.HandlerFunc {
 			FindByEmail(c, email)
 			return
 		}
-		log.Info().Msg("Llego hasta aqui")
-		log.Info().Msg(c.Query("company"))
+
 		companyId := c.Query("company")
 		if companyId == "" || companyId == "undefined" {
 			log.Error().Msg("Error getting user for a company, Company query parameter is missing")
