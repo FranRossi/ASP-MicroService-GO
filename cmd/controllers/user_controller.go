@@ -62,22 +62,6 @@ func CreateUser() gin.HandlerFunc {
 			return
 		}
 
-		// var companyIdObject primitive.ObjectID
-		// var err2 error = nil
-
-		// if user.Invitation {
-		// 	log.Info().Msg("user is invited")
-		// 	companyIdObject, err2 = primitive.ObjectIDFromHex(user.Company)
-		// } else {
-		// 	companyIdStr, err := CreateCompany(user.Company)
-		// 	if err != nil {
-		// 		log.Error().Err(err).Msg("Error creating company")
-		// 		c.JSON(http.StatusInternalServerError, responses.UserResponse{Status: http.StatusInternalServerError, Message: "company error", Data: map[string]interface{}{"data": err.Error()}})
-		// 		return
-		// 	}
-
-		// 	companyIdObject, err2 = primitive.ObjectIDFromHex(companyIdStr)
-		// }
 		companyIdObject, err2 := primitive.ObjectIDFromHex(user.Company)
 
 		if err2 != nil {
@@ -139,40 +123,6 @@ func FindById() gin.HandlerFunc {
 		c.JSON(http.StatusOK, responses.UserResponse{Status: http.StatusOK, Message: "success", Data: map[string]interface{}{"user": userWithCompany}})
 	}
 }
-
-// func CreateCompany(company string) (string, error) {
-// 	url := os.Getenv("COMPANY_SERVICE_URL")
-// 	jsonStr := []byte(`{"name":"` + company + `"}`)
-
-// 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonStr))
-// 	req.Header.Set("Content-Type", "application/json")
-
-// 	resp, err := Client.Do(req)
-
-// 	if err != nil || resp.StatusCode != http.StatusCreated {
-// 		log.Error().Err(err).Msg("Error creating a new company on separate service")
-// 		return "", errors.New("failed creating a new company on separate service")
-// 	}
-// 	defer resp.Body.Close()
-// 	bodyBytes, err := ioutil.ReadAll(resp.Body)
-// 	if err != nil || len(bodyBytes) == 0 {
-// 		log.Error().Err(err).Msg("Error reading response body when creating a new company on separate service")
-// 		return "", errors.New("failed reading response body when creating a new company on separate service")
-// 	}
-
-// 	// Extract values from response body
-// 	var responseMap map[string]interface{}
-// 	_ = json.Unmarshal(bodyBytes, &responseMap)
-
-// 	companyIdStr, ok := responseMap["id"].(string)
-// 	if !ok {
-// 		log.Error().Msg("Fail to extract companny ID")
-// 		return "", errors.New("failed to extract company Id from response body when creating a new company on separate service")
-// 	}
-// 	log.Info().Msg("Company created on separate service successfully")
-
-// 	return companyIdStr, nil
-// }
 
 func GetUsers() gin.HandlerFunc {
 	log.Info().Msg("Get all users endpoint reached")
